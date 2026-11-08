@@ -35,8 +35,7 @@ def main_kb():
     k = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     k.add("☕ منتجاتنا", "💰 قائمة الأسعار")
     k.add("🛒 اطلب الآن", "🎧 خدمة العملاء")
-  k.dd("شركة الوليد رقم واحد''")
-     
+    k.add("ℹ️ عن الشركة")
     return k
 
 def product_kb():
