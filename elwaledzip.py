@@ -1,369 +1,216 @@
-# -*- coding: utf-8 -*-
-# بوت شركة الوليد للبن - يعمل 24/7 على Render
-# ثبّت المكتبات المطلوبة: pip install pyTelegramBotAPI flask
-import os
-import threading
 import telebot
-from telebot import types
-from flask import Flask
 
-# إعداد السيرفر الوهمي (Keep-Alive) لإبقاء البوت مستيقظاً 24 ساعة على Render
-app_web = Flask("")
+# توكن البوت الخاص بك من BotFather
+TOKEN = '8998430604:AAG_ZjLiko94ETL3S2LvtPCc8f1nlVk-ajA'
+bot = telebot.TeleBot(TOKEN)
 
+# رقم معرفك الشخصي (Chat ID) لتصلك عليه طلبات العملاء كخدمة عملاء
+ADMIN_CHAT_ID = 8287570358
 
-@app_web.route("/")
-def home():
-  return "Waleed Coffee Bot is running 24/7!"
+user_data = {}
 
+# 1. بداية المحادثة مع العميل
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "أهلاً بك في متجر بن زهرة البرازيل! ☕\nمن فضلك، أرسل اسمك الثلاثي:")
+    user_data[chat_id] = {'step': 'waiting_for_name'}
 
-def run_web():
-  port = int(os.environ.get("PORT", 8080))
-  app_web.run(host="0.0.0.0", port=port)
+# 2. جمع البيانات خطوة بخطوة
+@bot.message_handler(func=lambda message: message.chat.id in user_data)
+def handle_user_steps(message):
+    chat_id = message.chat.id
+    current_step = user_data[chat_id].get('step')
 
+    if current_step == 'waiting_for_name':
+        user_data[chat_id]['name'] = message.text
+        user_data[chat_id]['step'] = 'waiting_for_phone'
+        bot.send_message(chat_id, f"أهلاً بك يا {message.text}.\nالآن أرسل رقم هاتفك المحمول:")
 
-def keep_alive():
-  t = Thread(target=run_web)
-  t.start()
+    elif current_step == 'waiting_for_phone':
+        user_data[chat_id]['phone'] = message.text
+        user_data[chat_id]['step'] = 'waiting_for_order'
+        bot.send_message(chat_id, "ممتاز! ما هو طلبك بالتفصيل؟ (مثال: نصف كيلو بن محوج):")
 
+    elif current_step == 'waiting_for_order':
+        user_data[chat_id]['order'] = message.text
+        name = user_data[chat_id]['name']
+        phone = user_data[chat_id]['phone']
+        order = user_data[chat_id]['order']
 
-# إعدادات البوت والمنتجات
-TOKENS = [
-    os.environ.get('BOT_TOKEN'),
-  # <--- ضع توكن البوت الحقيقي هنا بين العلامتين
-    "",  # توكن البوت الثاني (اختياري)
-    "",  # توكن البوت الثالث (اختياري)
-]
-ADMIN_ID = 8287570358  # رقم حساب الإدارة
-COMPANY = "شركة الوليد للبن"
-
-PRODUCTS = {
-    "بن زهرة البرازيل": {
-        "kg": 420,
-        "photos": [
-            "product_photo_1.jpg",
-            "product_photo_2.jpg",
-            "product_photo_3.jpg",
-        ],
-    },
-    "بن الفخامة": {"kg": 700, "photos": []},
-    "بن كلومبي": {"kg": 600, "photos": []},
-    "بن المصري": {"kg": 1000, "photos": []},
-    "البن البرازيلي الذهبي": {"kg": 630, "photos": []},
-}
-SIZES = {"كيلو": 1000, "250 جرام": 250, "125 جرام": 125, "50 جرام": 50}
-ROASTS = ["سادة", "فاتحة", "وسط", "غامقة", "محوجة"]
-STATES = {}
-
-
-def money(v):
-  return f"{v:.2f}".rstrip("0").rstrip(".")
-
-
-def main_kb():
-  k = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-  k.add("☕ منتجاتنا", "💰 قائمة الأسعار")
-  k.add("🛒 اطلب الآن", "🎧 خدمة العملاء")
-  k.add("ℹ️ عن الشركة")
-  return k
-
-
-def product_kb():
-  k = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-  names = list(PRODUCTS)
-  for i in range(0, len(names), 2):
-    k.add(*names[i : i + 2])
-  k.add("⬅️ القائمة الرئيسية")
-  return k
-
-
-def size_kb():
-  k = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-  k.add("كيلو", "250 جرام", "125 جرام", "50 جرام")
-  k.add("⬅️ القائمة الرئيسية")
-  return k
-
-
-def roast_kb():
-  k = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-  k.add(*ROASTS)
-  k.add("بدون تحديد", "⬅️ القائمة الرئيسية")
-  return k
-
-
-def price_text(name):
-  lines = [f"☕ {name}", "أسعار شركة الوليد:", ""]
-  for size, grams in SIZES.items():
-    lines.append(
-        f"• {size}: {money(PRODUCTS[name]['kg'] * grams / 1000)} جنيه"
-    )
-  return "\n".join(lines)
-
-
-def send_photos(bot, chat_id, name):
-  for filename in PRODUCTS[name]["photos"]:
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
-    if os.path.isfile(path):
-      with open(path, "rb") as photo:
-        bot.send_photo(chat_id, photo)
-
-
-def setup_bot(token, number):
-  bot = telebot.TeleBot(token)
-  STATES[number] = {}
-
-  def state(chat_id):
-    return STATES[number].setdefault(chat_id, {})
-
-  @bot.message_handler(commands=["start"])
-  def start(m):
-    STATES[number].pop(m.chat.id, None)
-    bot.send_message(
-        m.chat.id,
-        "☕ شركة الوليد للبن\n━━━━━━━━━━━━━━\nأهلاً وسهلاً بحضرتك ❤️\n"
-        "اختار الخدمة من الأزرار أو اكتب سؤالك واسم البن مباشرة.",
-        reply_markup=main_kb(),
-    )
-
-  @bot.message_handler(commands=["admin"])
-  def admin(m):
-    if m.from_user.id != ADMIN_ID:
-      return bot.reply_to(m, "هذا الأمر للإدارة فقط.")
-    bot.reply_to(
-        m,
-        "👑 لوحة إدارة شركة الوليد\n"
-        "للرد على عميل:\n/reply رقم_العميل نص_الرسالة\n"
-        "لتعديل سعر الكيلو:\n/setprice اسم_المنتج السعر\n"
-        "مثال: /setprice بن زهرة البرازيل 450",
-    )
-
-  @bot.message_handler(commands=["reply"])
-  def reply_customer(m):
-    if m.from_user.id != ADMIN_ID:
-      return
-    p = m.text.split(maxsplit=2)
-    if len(p) < 3 or not p[1].isdigit():
-      return bot.reply_to(m, "استخدم: /reply رقم_العميل نص_الرسالة")
-    try:
-      bot.send_message(
-          int(p[1]), "🎧 رسالة من خدمة عملاء شركة الوليد:\n\n" + p[2]
-      )
-      bot.reply_to(m, "✅ تم إرسال الرد.")
-    except Exception as e:
-      bot.reply_to(m, "تعذر الإرسال: " + str(e))
-
-  @bot.message_handler(commands=["setprice"])
-  def setprice(m):
-    if m.from_user.id != ADMIN_ID:
-      return
-    p = m.text.split()
-    if len(p) < 4:
-      return bot.reply_to(m, "مثال: /setprice بن زهرة البرازيل 450")
-    name, raw = " ".join(p[1:-1]), p[-1]
-    if name not in PRODUCTS:
-      return bot.reply_to(m, "اسم المنتج غير موجود.")
-    try:
-      PRODUCTS[name]["kg"] = float(raw)
-      bot.reply_to(
-          m, f"✅ تم تحديث سعر كيلو {name} إلى {money(float(raw))} جنيه."
-      )
-    except ValueError:
-      bot.reply_to(m, "السعر يجب أن يكون رقمًا.")
-
-  @bot.message_handler(content_types=["text"])
-  def handle(m):
-    cid, msg = m.chat.id, (m.text or "").strip()
-    s = state(cid)
-    step = s.get("step")
-
-    if msg == "⬅️ القائمة الرئيسية":
-      STATES[number].pop(cid, None)
-      return bot.send_message(
-          cid, "☕ أهلاً بحضرتك في شركة الوليد ❤️", reply_markup=main_kb()
-      )
-
-    if step == "support":
-      try:
-        bot.send_message(
-            ADMIN_ID,
-            f"🎧 رسالة خدمة عملاء جديدة | البوت {number}\n"
-            f"العميل: {m.from_user.first_name}\nCustomer ID: {cid}\n\n{msg}\n"
-            f"للرد: /reply {cid} اكتب الرد",
+        # تأكيد الطلب للعميل
+        confirmation_text = (
+            "✅ تم تسجيل طلبك بنجاح وتحويله إلى خدمة العملاء!\n\n"
+            f"👤 الاسم: {name}\n"
+            f"📱 الهاتف: {phone}\n"
+            f"📦 الطلب: {order}\n\n"
+            "سنتواصل معك قريباً لتأكيد الشحن والتوصيل. ☕"
         )
-        bot.send_message(
-            cid,
-            "✅ وصلت رسالتك لخدمة العملاء، سنرد عليك قريبًا ❤️",
-            reply_markup=main_kb(),
+        bot.send_message(chat_id, confirmation_text)
+
+        # إرسال تفاصيل الطلب فوراً إلى حسابك الشخصي (خدمة العملاء) لضمان عدم ضياعه
+        admin_message = (
+            "🚨 **طلب جديد لمتجر البن!**\n\n"
+            f"👤 الاسم: {name}\n"
+            f"📱 الهاتف: {phone}\n"
+            f"📦 الطلب: {order}\n"
+            f"💬 معرف محادثة العميل: `{chat_id}`"
         )
-      except Exception:
-        bot.send_message(cid, "تعذر إرسال الرسالة للإدارة. حاول لاحقًا.")
-      s.clear()
-      return
+        try:
+            bot.send_message(ADMIN_CHAT_ID, admin_message, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error sending to admin: {e}")
 
-    if step == "product":
-      if msg not in PRODUCTS:
-        return bot.send_message(
-            cid, "اختار منتجًا من الأزرار.", reply_markup=product_kb()
+        # مسح الذاكرة المؤقتة للعميل
+        del user_data[chat_id]
+
+# 3. الرد على أي رسالة أخرى
+@bot.message_handler(func=lambda message: True)
+def reply_anything(message):
+    bot.reply_to(message, "أهلاً بك! لطلب البن والتواصل مع خدمة العملاء، يرجى إرسال الأمر:\n/start")
+
+bot.infinity_polling()
+import telebot
+
+# توكن البوت الخاص بك من BotFather
+TOKEN = '8998430604:AAG_ZjLiko94ETL3S2LvtPCc8f1nlVk-ajA'
+bot = telebot.TeleBot(TOKEN)
+
+# رقم معرفك الشخصي (Chat ID) لتصلك عليه طلبات العملاء كخدمة عملاء
+ADMIN_CHAT_ID = 8287570358
+
+user_data = {}
+
+# 1. بداية المحادثة مع العميل
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "أهلاً بك في متجر بن زهرة البرازيل! ☕\nمن فضلك، أرسل اسمك الثلاثي:")
+    user_data[chat_id] = {'step': 'waiting_for_name'}
+
+# 2. جمع البيانات خطوة بخطوة
+@bot.message_handler(func=lambda message: message.chat.id in user_data)
+def handle_user_steps(message):
+    chat_id = message.chat.id
+    current_step = user_data[chat_id].get('step')
+
+    if current_step == 'waiting_for_name':
+        user_data[chat_id]['name'] = message.text
+        user_data[chat_id]['step'] = 'waiting_for_phone'
+        bot.send_message(chat_id, f"أهلاً بك يا {message.text}.\nالآن أرسل رقم هاتفك المحمول:")
+
+    elif current_step == 'waiting_for_phone':
+        user_data[chat_id]['phone'] = message.text
+        user_data[chat_id]['step'] = 'waiting_for_order'
+        bot.send_message(chat_id, "ممتاز! ما هو طلبك بالتفصيل؟ (مثال: نصف كيلو بن محوج):")
+
+    elif current_step == 'waiting_for_order':
+        user_data[chat_id]['order'] = message.text
+        name = user_data[chat_id]['name']
+        phone = user_data[chat_id]['phone']
+        order = user_data[chat_id]['order']
+
+        # تأكيد الطلب للعميل
+        confirmation_text = (
+            "✅ تم تسجيل طلبك بنجاح وتحويله إلى خدمة العملاء!\n\n"
+            f"👤 الاسم: {name}\n"
+            f"📱 الهاتف: {phone}\n"
+            f"📦 الطلب: {order}\n\n"
+            "سنتواصل معك قريباً لتأكيد الشحن والتوصيل. ☕"
         )
-      s["product"] = msg
-      s["step"] = "size"
-      return bot.send_message(cid, "اختار الوزن:", reply_markup=size_kb())
-    if step == "size":
-      if msg not in SIZES:
-        return bot.send_message(
-            cid, "اختار وزنًا من الأزرار.", reply_markup=size_kb()
+        bot.send_message(chat_id, confirmation_text)
+
+        # إرسال تفاصيل الطلب فوراً إلى حسابك الشخصي (خدمة العملاء) لضمان عدم ضياعه
+        admin_message = (
+            "🚨 **طلب جديد لمتجر البن!**\n\n"
+            f"👤 الاسم: {name}\n"
+            f"📱 الهاتف: {phone}\n"
+            f"📦 الطلب: {order}\n"
+            f"💬 معرف محادثة العميل: `{chat_id}`"
         )
-      s["size"] = msg
-      s["step"] = "roast"
-      return bot.send_message(
-          cid, "اختار درجة التحميص:", reply_markup=roast_kb()
-      )
-    if step == "roast":
-      if msg not in ROASTS and msg != "بدون تحديد":
-        return bot.send_message(
-            cid, "اختار درجة التحميص من الأزرار.", reply_markup=roast_kb()
+        try:
+            bot.send_message(ADMIN_CHAT_ID, admin_message, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error sending to admin: {e}")
+
+        # مسح الذاكرة المؤقتة للعميل
+        del user_data[chat_id]
+
+# 3. الرد على أي رسالة أخرى
+@bot.message_handler(func=lambda message: True)
+def reply_anything(message):
+    bot.reply_to(message, "أهلاً بك! لطلب البن والتواصل مع خدمة العملاء، يرجى إرسال الأمر:\n/start")
+
+bot.infinity_polling()
+import telebot
+
+# توكن البوت الخاص بك من BotFather
+TOKEN = '8998430604:AAG_ZjLiko94ETL3S2LvtPCc8f1nlVk-ajA'
+bot = telebot.TeleBot(TOKEN)
+
+# رقم معرفك الشخصي (Chat ID) لتصلك عليه طلبات العملاء كخدمة عملاء
+ADMIN_CHAT_ID = 8287570358
+
+user_data = {}
+
+# 1. بداية المحادثة مع العميل
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "أهلاً بك في متجر بن زهرة البرازيل! ☕\nمن فضلك، أرسل اسمك الثلاثي:")
+    user_data[chat_id] = {'step': 'waiting_for_name'}
+
+# 2. جمع البيانات خطوة بخطوة
+@bot.message_handler(func=lambda message: message.chat.id in user_data)
+def handle_user_steps(message):
+    chat_id = message.chat.id
+    current_step = user_data[chat_id].get('step')
+
+    if current_step == 'waiting_for_name':
+        user_data[chat_id]['name'] = message.text
+        user_data[chat_id]['step'] = 'waiting_for_phone'
+        bot.send_message(chat_id, f"أهلاً بك يا {message.text}.\nالآن أرسل رقم هاتفك المحمول:")
+
+    elif current_step == 'waiting_for_phone':
+        user_data[chat_id]['phone'] = message.text
+        user_data[chat_id]['step'] = 'waiting_for_order'
+        bot.send_message(chat_id, "ممتاز! ما هو طلبك بالتفصيل؟ (مثال: نصف كيلو بن محوج):")
+
+    elif current_step == 'waiting_for_order':
+        user_data[chat_id]['order'] = message.text
+        name = user_data[chat_id]['name']
+        phone = user_data[chat_id]['phone']
+        order = user_data[chat_id]['order']
+
+        # تأكيد الطلب للعميل
+        confirmation_text = (
+            "✅ تم تسجيل طلبك بنجاح وتحويله إلى خدمة العملاء!\n\n"
+            f"👤 الاسم: {name}\n"
+            f"📱 الهاتف: {phone}\n"
+            f"📦 الطلب: {order}\n\n"
+            "سنتواصل معك قريباً لتأكيد الشحن والتوصيل. ☕"
         )
-      s["roast"] = msg
-      s["step"] = "name"
-      return bot.send_message(
-          cid, "اكتب اسم حضرتك:", reply_markup=types.ReplyKeyboardRemove()
-      )
-    if step == "name":
-      s["name"], s["step"] = msg, "phone"
-      return bot.send_message(cid, "اكتب رقم الهاتف للتواصل:")
-    if step == "phone":
-      s["phone"], s["step"] = msg, "address"
-      return bot.send_message(cid, "اكتب عنوان التوصيل:")
-    if step == "address":
-      s["address"] = msg
-      grams = SIZES[s["size"]]
-      s["cost"] = PRODUCTS[s["product"]]["kg"] * grams / 1000
-      s["step"] = "confirm"
-      summary = (
-          "🧾 تفاصيل الطلب - شركة الوليد\n━━━━━━━━━━━━━━\n"
-          f"المنتج: {s['product']}\nالوزن: {s['size']}\n"
-          f"التحميص: {s['roast']}\nالسعر: {money(s['cost'])} جنيه\n\n"
-          f"اسم العميل: {s['name']}\nالهاتف: {s['phone']}\n"
-          f"العنوان: {s['address']}\nCustomer ID: {cid}\n\nهل تؤكد الطلب؟"
-      )
-      k = types.ReplyKeyboardMarkup(resize_keyboard=True)
-      k.add("✅ تأكيد الطلب", "❌ إلغاء")
-      return bot.send_message(cid, summary, reply_markup=k)
-    if step == "confirm":
-      if msg == "❌ إلغاء":
-        STATES[number].pop(cid, None)
-        return bot.send_message(
-            cid, "تم إلغاء الطلب.", reply_markup=main_kb()
+        bot.send_message(chat_id, confirmation_text)
+
+        # إرسال تفاصيل الطلب فوراً إلى حسابك الشخصي (خدمة العملاء) لضمان عدم ضياعه
+        admin_message = (
+            "🚨 **طلب جديد لمتجر البن!**\n\n"
+            f"👤 الاسم: {name}\n"
+            f"📱 الهاتف: {phone}\n"
+            f"📦 الطلب: {order}\n"
+            f"💬 معرف محادثة العميل: `{chat_id}`"
         )
-      if msg != "✅ تأكيد الطلب":
-        return bot.send_message(cid, "اختار تأكيد الطلب أو إلغاء.")
-      order = (
-          f"🛒 طلب جديد | شركة الوليد | البوت {number}\n"
-          f"المنتج: {s['product']}\nالوزن: {s['size']}\nالتحميص: {s['roast']}\n"
-          f"السعر: {money(s['cost'])} جنيه\nالاسم: {s['name']}\n"
-          f"الهاتف: {s['phone']}\nالعنوان: {s['address']}\nCustomer ID: {cid}"
-      )
-      try:
-        bot.send_message(ADMIN_ID, order)
-        bot.send_message(
-            cid,
-            "✅ تم تسجيل طلب حضرتك وإرساله للإدارة.\nسنتواصل معك لتأكيد الطلب."
-            " شكرًا لثقتك في شركة الوليد ❤️",
-            reply_markup=main_kb(),
-        )
-      except Exception:
-        bot.send_message(
-            cid,
-            "لم نتمكن من إرسال الطلب للإدارة الآن. حاول لاحقًا.",
-            reply_markup=main_kb(),
-        )
-      STATES[number].pop(cid, None)
-      return
+        try:
+            bot.send_message(ADMIN_CHAT_ID, admin_message, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error sending to admin: {e}")
 
-    if msg in ("☕ منتجاتنا", "الأنواع", "المنتجات"):
-      return bot.send_message(
-          cid, "☕ منتجات شركة الوليد - اختار المنتج:", reply_markup=product_kb()
-      )
-    if msg in ("💰 قائمة الأسعار", "الأسعار", "الأسعار كلها"):
-      text = "💰 قائمة الأسعار (سعر الكيلو):\n\n" + "\n".join(
-          f"☕ {n}: {money(d['kg'])} جنيه" for n, d in PRODUCTS.items()
-      )
-      return bot.send_message(cid, text, reply_markup=main_kb())
-    if msg in ("🛒 اطلب الآن", "اطلب", "طلب", "عايز أطلب", "اريد طلب"):
-      s.clear()
-      s["step"] = "product"
-      return bot.send_message(
-          cid, "اختار المنتج المطلوب:", reply_markup=product_kb()
-      )
-    if msg in ("🎧 خدمة العملاء", "خدمة العملاء"):
-      s["step"] = "support"
-      return bot.send_message(
-          cid,
-          "اكتب رسالتك الآن وسيتم إرسالها لخدمة العملاء ❤️",
-          reply_markup=main_kb(),
-      )
-    if msg in ("ℹ️ عن الشركة", "عن الشركة"):
-      return bot.send_message(
-          cid,
-          "☕ شركة الوليد للبن\nجودة نختارها بعناية وطعم يسعد يومك ❤️",
-          reply_markup=main_kb(),
-      )
+        # مسح الذاكرة المؤقتة للعميل
+        del user_data[chat_id]
 
-    normalized = msg.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
-    found = None
-    for name in PRODUCTS:
-      if name in msg or name.replace("أ", "ا") in normalized:
-        found = name
-        break
-    if found:
-      send_photos(bot, cid, found)
-      return bot.send_message(cid, price_text(found), reply_markup=main_kb())
-    if any(x in msg for x in ["سعر", "بكام", "بكم", "كيلو", "جرام"]):
-      return bot.send_message(
-          cid,
-          "أهلاً بحضرتك ❤️ اختار نوع البن لمعرفة السعر:",
-          reply_markup=product_kb(),
-      )
-    if any(x in msg for x in ["سلام", "مرحبا", "اهلا", "أهلا"]):
-      return bot.send_message(
-          cid, "أهلاً وسهلاً بحضرتك في شركة الوليد ❤️☕", reply_markup=main_kb()
-      )
-    return bot.send_message(
-        cid,
-        "اكتب اسم نوع البن أو كلمة الأسعار، أو اختار خدمة من الأزرار.",
-        reply_markup=main_kb(),
-    )
+# 3. الرد على أي رسالة أخرى
+@bot.message_handler(func=lambda message: True)
+def reply_anything(message):
+    bot.reply_to(message, "أهلاً بك! لطلب البن والتواصل مع خدمة العملاء، يرجى إرسال الأمر:\n/start")
 
-  return bot
-
-
-def main():
-  # تشغيل السيرفر الوهمي أولاً لإبقاء البوت حياً على Render
-  keep_alive()
-
-  active = []
-  for number, token in enumerate(TOKENS, 1):
-    token = token.strip()
-    if not token or token.startswith("ضع_") or token.startswith("PUT_"):
-      continue
-    try:
-      active.append((setup_bot(token, number), number))
-    except Exception as e:
-      print(f"خطأ في إعداد البوت {number}: {e}")
-  if not active:
-    print("⚠️ تنبيه: يرجى وضع توكن البوت الحقيقي في قائمة TOKENS أعلى الملف.")
-    return
-  print(f"✅ تم تشغيل {len(active)} بوت/بوتات شركة الوليد بنجاح.")
-  for bot, number in active:
-    threading.Thread(
-        target=lambda b=bot: b.infinity_polling(skip_pending=True, timeout=30),
-        daemon=True,
-    ).start()
-  try:
-    while True:
-      threading.Event().wait(1)
-  except KeyboardInterrupt:
-    print("تم إيقاف التشغيل.")
-
-
-if __name__ == "__main__":
-  main()
+bot.infinity_polling()
