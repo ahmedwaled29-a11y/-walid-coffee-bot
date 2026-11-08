@@ -22,7 +22,7 @@ def run_web():
 
 
 def keep_alive():
-  t = target(target=run_web)
+  t = Thread(target=run_web)
   t.start()
 
 
